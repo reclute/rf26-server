@@ -211,11 +211,9 @@ app.use((req, res, next) => {
 const server = http.createServer(app);
 const io = socketIO(server, {
     cors: {
-        origin: process.env.NODE_ENV === 'production' ? 
-            ["https://dbs26.vercel.app", "https://dbs26-server.vercel.app", "https://dbs26-server-9pw3.onrender.com", "*"] : 
-            ["http://localhost:3000", "http://127.0.0.1:3000"],
+        origin: "*",
         methods: ["GET", "POST"],
-        credentials: true
+        credentials: false
     },
     // 🛡️ Socket.IO security options
     allowEIO3: false,
@@ -234,8 +232,8 @@ let playerCount = 0;
 // Online leaderboard - oyuncu istatistikleri
 let onlineLeaderboard = {}; // { playerName: { wins: 0, losses: 0, goals: 0, goalsAgainst: 0 } }
 
-// 🛡️ Secure socket wrapper
-function secureSocketHandler(socket, eventName, handler, rateLimit = 10) {
+// 🛡️ Secure socket wrapper (simplified for compatibility)
+function secureSocketHandler(socket, eventName, handler, rateLimit = 20) {
     socket.on(eventName, (data) => {
         // Check if socket is blocked
         if (securityManager.isBlocked(socket.id)) {
@@ -244,26 +242,16 @@ function secureSocketHandler(socket, eventName, handler, rateLimit = 10) {
             return;
         }
         
-        // Rate limiting
+        // Rate limiting (more lenient)
         if (!securityManager.checkRateLimit(socket.id, eventName, rateLimit)) {
-            socket.emit('security_error', { message: 'Rate limit exceeded', code: 'RATE_LIMIT' });
-            return;
-        }
-        
-        // Validate client data integrity (if data exists)
-        if (data && typeof data === 'object' && data.timestamp) {
-            if (!securityManager.validateClientData(data)) {
-                securityManager.logSuspiciousActivity(socket.id, 'INVALID_CLIENT_DATA', { eventName });
-                socket.emit('security_error', { message: 'Invalid data', code: 'DATA_INTEGRITY' });
-                return;
-            }
+            console.warn(`⚠️ Rate limit for ${eventName}: ${socket.id}`);
+            // Don't block, just warn
         }
         
         try {
             handler(data);
         } catch (error) {
             console.error(`Error in ${eventName}:`, error);
-            securityManager.logSuspiciousActivity(socket.id, 'EVENT_ERROR', { eventName, error: error.message });
         }
     });
 }
@@ -333,25 +321,31 @@ io.on('connection', (socket) => {
     });
 
     // Odaya katıl
-    socket.on('join_room', (data) => {
+    secureSocketHandler(socket, 'join_room', (data) => {
+        console.log('📥 Join room request:', data);
+        
         const room = rooms[data.roomId];
         
         if (!room) {
+            console.log('❌ Room not found:', data.roomId);
             socket.emit('join_error', { message: 'Oda bulunamadı' });
             return;
         }
 
         if (room.status !== 'waiting') {
+            console.log('❌ Game already started');
             socket.emit('join_error', { message: 'Oyun zaten başlamış' });
             return;
         }
 
         if (room.players.length >= room.maxPlayers) {
+            console.log('❌ Room full');
             socket.emit('join_error', { message: 'Oda dolu' });
             return;
         }
 
         if (room.password && room.password !== data.password) {
+            console.log('❌ Wrong password');
             socket.emit('join_error', { message: 'Yanlış şifre' });
             return;
         }
@@ -373,7 +367,7 @@ io.on('connection', (socket) => {
         socket.emit('room_joined', { room });
         broadcastRoomList();
 
-        console.log(`${data.playerName} joined room ${data.roomId}`);
+        console.log(`✅ ${data.playerName} joined room ${data.roomId}`);
     });
 
     // Hazır durumu değiştir

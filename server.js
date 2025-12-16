@@ -516,8 +516,8 @@ io.on('connection', (socket) => {
         // Reset half-time ready status
         room.halfTimeReady = new Set();
         
-        // Diğer oyunculara half-time'ı bildir
-        socket.to(socket.currentRoom).emit('half_time_started', {
+        // TÜM oyunculara (host dahil) half-time'ı bildir
+        io.to(socket.currentRoom).emit('half_time_started', {
             playerScore: data.playerScore,
             aiScore: data.aiScore
         });

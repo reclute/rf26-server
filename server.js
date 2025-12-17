@@ -825,6 +825,16 @@ io.on('connection', (socket) => {
         
         socket.emit('online_friends_update', { onlineFriends });
     });
+    
+    // Second half start - synchronize all players
+    socket.on('second_half_start', () => {
+        if (!socket.currentRoom) return;
+        
+        console.log(`⚽ Second half started in room ${socket.currentRoom}`);
+        
+        // Notify all players in the room (including sender)
+        io.to(socket.currentRoom).emit('second_half_started');
+    });
 
     // Odadan ayrıl
     socket.on('leave_room', () => {

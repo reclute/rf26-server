@@ -232,6 +232,28 @@ let playerCount = 0;
 // Online leaderboard - oyuncu istatistikleri
 let onlineLeaderboard = {}; // { playerName: { wins: 0, losses: 0, goals: 0, goalsAgainst: 0 } }
 
+// Registered players and pending friend requests
+let registeredPlayers = new Set(); // Players who have played at least once
+let pendingFriendRequests = {}; // { playerName: [{ from, timestamp, id }] }
+
+// Function to deliver pending friend requests when player comes online
+function deliverPendingFriendRequests(socket, playerName) {
+    if (pendingFriendRequests[playerName] && pendingFriendRequests[playerName].length > 0) {
+        console.log(`📬 Delivering ${pendingFriendRequests[playerName].length} pending friend requests to ${playerName}`);
+        
+        pendingFriendRequests[playerName].forEach(request => {
+            socket.emit('friend_request_received', {
+                id: request.id,
+                from: request.from,
+                timestamp: request.timestamp
+            });
+        });
+        
+        // Clear delivered requests
+        delete pendingFriendRequests[playerName];
+    }
+}
+
 // 🛡️ Secure socket wrapper (simplified for compatibility)
 function secureSocketHandler(socket, eventName, handler, rateLimit = 20) {
     socket.on(eventName, (data) => {
@@ -307,6 +329,10 @@ io.on('connection', (socket) => {
         socket.join(roomId);
         socket.currentRoom = roomId;
         socket.playerName = data.playerName;
+        
+        // Register player and deliver pending friend requests
+        registeredPlayers.add(data.playerName);
+        deliverPendingFriendRequests(socket, data.playerName);
 
         socket.emit('room_created', { roomId, room: roomData });
         broadcastRoomList();
@@ -361,6 +387,10 @@ io.on('connection', (socket) => {
         socket.join(data.roomId);
         socket.currentRoom = data.roomId;
         socket.playerName = data.playerName;
+        
+        // Register player and deliver pending friend requests
+        registeredPlayers.add(data.playerName);
+        deliverPendingFriendRequests(socket, data.playerName);
 
         // Odadaki herkese bildir
         io.to(data.roomId).emit('player_joined', { player, room });
@@ -617,6 +647,13 @@ io.on('connection', (socket) => {
         const playerName = data.playerName;
         if (!playerName) return;
         
+        // Register player and deliver pending friend requests if not already set
+        if (!socket.playerName) {
+            socket.playerName = playerName;
+            registeredPlayers.add(playerName);
+            deliverPendingFriendRequests(socket, playerName);
+        }
+        
         if (!onlineLeaderboard[playerName]) {
             onlineLeaderboard[playerName] = {
                 name: playerName,
@@ -658,6 +695,135 @@ io.on('connection', (socket) => {
             .slice(0, 10); // İlk 10 oyuncu
 
         socket.emit('leaderboard_data', leaderboardArray);
+    });
+
+    // Friend System Events
+    socket.on('send_friend_request', (data) => {
+        const { from, to } = data;
+        console.log(`👥 Friend request: ${from} -> ${to}`);
+        
+        // Register both players as they've interacted with the system
+        registeredPlayers.add(from);
+        registeredPlayers.add(to);
+        
+        // Find target player
+        const targetSocket = Array.from(io.sockets.sockets.values())
+            .find(s => s.playerName === to);
+        
+        if (targetSocket) {
+            // Player is online - deliver immediately
+            const requestId = Date.now().toString();
+            targetSocket.emit('friend_request_received', {
+                id: requestId,
+                from: from,
+                timestamp: Date.now()
+            });
+            console.log(`✅ Friend request delivered to ${to} (online)`);
+        } else {
+            // Player is offline - store for later delivery
+            if (!pendingFriendRequests[to]) {
+                pendingFriendRequests[to] = [];
+            }
+            
+            const requestId = Date.now().toString();
+            pendingFriendRequests[to].push({
+                id: requestId,
+                from: from,
+                timestamp: Date.now()
+            });
+            
+            console.log(`📬 Friend request stored for ${to} (offline)`);
+            socket.emit('friend_request_sent', {
+                message: `Friend request sent to ${to}! They will receive it when they come online.`
+            });
+        }
+    });
+    
+    socket.on('accept_friend_request', (data) => {
+        const { from, to } = data;
+        console.log(`✅ Friend request accepted: ${from} accepted ${to}`);
+        
+        // Notify the original sender
+        const targetSocket = Array.from(io.sockets.sockets.values())
+            .find(s => s.playerName === to);
+        
+        if (targetSocket) {
+            targetSocket.emit('friend_request_accepted', {
+                from: from
+            });
+        }
+    });
+    
+    socket.on('decline_friend_request', (data) => {
+        const { from, to } = data;
+        console.log(`❌ Friend request declined: ${from} declined ${to}`);
+        
+        // Notify the original sender
+        const targetSocket = Array.from(io.sockets.sockets.values())
+            .find(s => s.playerName === to);
+        
+        if (targetSocket) {
+            targetSocket.emit('friend_request_declined', {
+                from: from
+            });
+        }
+    });
+    
+    socket.on('remove_friend', (data) => {
+        const { from, to } = data;
+        console.log(`💔 Friend removed: ${from} removed ${to}`);
+        
+        // Notify the removed friend
+        const targetSocket = Array.from(io.sockets.sockets.values())
+            .find(s => s.playerName === to);
+        
+        if (targetSocket) {
+            targetSocket.emit('friend_removed', {
+                from: from
+            });
+        }
+    });
+    
+    socket.on('send_game_invite', (data) => {
+        const { from, to, roomId, roomName } = data;
+        console.log(`🎮 Game invite: ${from} invited ${to} to room ${roomName}`);
+        
+        // Find target player
+        const targetSocket = Array.from(io.sockets.sockets.values())
+            .find(s => s.playerName === to);
+        
+        if (targetSocket) {
+            const inviteId = Date.now().toString();
+            targetSocket.emit('game_invite_received', {
+                id: inviteId,
+                from: from,
+                roomId: roomId,
+                roomName: roomName,
+                timestamp: Date.now()
+            });
+            console.log(`✅ Game invite delivered to ${to}`);
+        } else {
+            socket.emit('game_invite_failed', {
+                message: 'Player not found or offline'
+            });
+            console.log(`❌ Game invite failed: ${to} not online`);
+        }
+    });
+    
+    socket.on('get_online_friends', (data) => {
+        const { friendNames } = data;
+        const onlineFriends = [];
+        
+        friendNames.forEach(friendName => {
+            const friendSocket = Array.from(io.sockets.sockets.values())
+                .find(s => s.playerName === friendName);
+            
+            if (friendSocket) {
+                onlineFriends.push(friendName);
+            }
+        });
+        
+        socket.emit('online_friends_update', { onlineFriends });
     });
 
     // Odadan ayrıl
@@ -783,6 +949,26 @@ function cleanupOldRooms() {
 
 // Her 2 dakikada bir eski odaları temizle
 setInterval(cleanupOldRooms, 2 * 60 * 1000);
+
+// Clean up old pending friend requests (older than 7 days)
+function cleanupOldFriendRequests() {
+    const now = Date.now();
+    const WEEK_IN_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+    
+    Object.keys(pendingFriendRequests).forEach(playerName => {
+        pendingFriendRequests[playerName] = pendingFriendRequests[playerName].filter(request => {
+            return (now - request.timestamp) < WEEK_IN_MS;
+        });
+        
+        // Remove empty arrays
+        if (pendingFriendRequests[playerName].length === 0) {
+            delete pendingFriendRequests[playerName];
+        }
+    });
+}
+
+// Clean up old friend requests every 24 hours
+setInterval(cleanupOldFriendRequests, 24 * 60 * 60 * 1000);
 
 // Sunucuyu başlat
 const PORT = process.env.PORT || 3000;

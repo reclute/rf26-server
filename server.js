@@ -423,21 +423,6 @@ io.on('connection', (socket) => {
     socket.on('game_update', (data) => {
         if (!socket.currentRoom) return;
         
-        // Validate player position to prevent impossible movements
-        if (data.x !== undefined && data.y !== undefined) {
-            // Clamp positions to reasonable field bounds
-            data.x = Math.max(-50, Math.min(950, data.x));
-            data.y = Math.max(-50, Math.min(650, data.y));
-        }
-        
-        // Validate velocities to prevent excessive speeds
-        if (data.vx !== undefined) {
-            data.vx = Math.max(-20, Math.min(20, data.vx));
-        }
-        if (data.vy !== undefined) {
-            data.vy = Math.max(-20, Math.min(20, data.vy));
-        }
-        
         // Performans için log yok (çok sık çağrılıyor)
         socket.to(socket.currentRoom).emit('game_update', {
             playerId: socket.playerId,

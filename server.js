@@ -429,6 +429,17 @@ io.on('connection', (socket) => {
             ...data
         });
     });
+    
+    // New player sync system - optimized
+    socket.on('player_sync', (data) => {
+        if (!socket.currentRoom) return;
+        
+        // Forward to opponent with sender ID
+        socket.to(socket.currentRoom).emit('player_sync', {
+            playerId: socket.playerId,
+            ...data
+        });
+    });
 
     // Top dokunma - hem host hem guest için
     socket.on('ball_touch', (data) => {

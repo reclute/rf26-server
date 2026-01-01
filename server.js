@@ -434,10 +434,14 @@ io.on('connection', (socket) => {
     socket.on('player_sync', (data) => {
         if (!socket.currentRoom) return;
         
-        // Forward to opponent with sender ID
+        // Forward to opponent with sender ID and timestamp
         socket.to(socket.currentRoom).emit('player_sync', {
             playerId: socket.playerId,
-            ...data
+            x: data.x,
+            y: data.y,
+            vx: data.vx,
+            vy: data.vy,
+            timestamp: Date.now()
         });
     });
 
@@ -477,7 +481,8 @@ io.on('connection', (socket) => {
             ballY: data.ballY,
             ballVx: data.ballVx,
             ballVy: data.ballVy,
-            isHost: data.isHost
+            isHost: data.isHost,
+            timestamp: Date.now()
         });
     });
     
